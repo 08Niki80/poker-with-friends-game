@@ -2,6 +2,8 @@ const { Deck } = require('./Deck');
 const Player = require('./Player');
 const { determineWinners, HAND_NAMES, evaluateHand } = require('./handEvaluator');
 
+const BETTING_PHASES = ['PRE_FLOP', 'FLOP', 'TURN', 'RIVER'];
+
 class Game {
   constructor(roomId, smallBlind = 5, bigBlind = 10) {
     this.roomId = roomId;
@@ -18,13 +20,14 @@ class Game {
     this.minRaise = bigBlind;
     this.actionOrder = [];
     this.actionIndex = 0;
-    this.lastRaiseIndex = -1;
     this.handNumber = 0;
     this.smallBlindIndex = -1;
     this.bigBlindIndex = -1;
     this.lastActions = [];
     this.winningPlayers = [];
     this.winningHandName = '';
+    this.hasActed = new Set();
+    this.hostId = null;
   }
 
   addPlayer(id, name) {
@@ -32,6 +35,9 @@ class Game {
     const player = new Player(id, name);
     player.seatIndex = this.players.length;
     this.players.push(player);
+    if (this.hostId === null) {
+      this.hostId = id;
+    }
     if (this.phase === 'WAITING' && this.players.length >= 2) {
       this.dealerIndex = 0;
     }
@@ -49,7 +55,39 @@ class Game {
     if (this.dealerIndex >= this.players.length) {
       this.dealerIndex = 0;
     }
+    if (this.hostId === id) {
+      this.hostId = this.players.length > 0 ? this.players[0].id : null;
+    }
     return true;
+  }
+
+  getHostId() {
+    return this.hostId;
+  }
+
+  findDisconnectedPlayer(name) {
+    return this.players.find(p => p.disconnected && p.name === name);
+  }
+
+  reclaimPlayer(oldId, newId) {
+    const player = this.players.find(p => p.id === oldId);
+    if (!player) return false;
+    player.id = newId;
+    player.disconnected = false;
+    return true;
+  }
+
+  markPlayerDisconnected(id) {
+    const player = this.players.find(p => p.id === id);
+    if (!player) return;
+    player.disconnected = true;
+
+    if (BETTING_PHASES.includes(this.phase)) {
+      const currentPlayer = this.getCurrentPlayer();
+      if (currentPlayer && currentPlayer.id === id && !player.folded && !player.isAllIn) {
+        this.processAction(id, 'fold');
+      }
+    }
   }
 
   canStart() {
@@ -69,6 +107,7 @@ class Game {
     this.lastActions = [];
     this.winningPlayers = [];
     this.winningHandName = '';
+    this.hasActed = new Set();
 
     this.deck.reset();
     this.deck.shuffle();
@@ -89,16 +128,19 @@ class Game {
 
     this.postBlinds();
     this.dealHoleCards();
+
     this.phase = 'PRE_FLOP';
     this.minRaise = this.bigBlind;
     this.currentBet = this.bigBlind;
 
+    const sbPlayer = this.players[this.smallBlindIndex];
+    if (sbPlayer && !sbPlayer.isAllIn) {
+      this.hasActed.add(sbPlayer.id);
+    }
+
     const utgIndex = this.getNextActiveIndex(this.bigBlindIndex);
     this.actionIndex = this.actionOrder.findIndex(p => p.id === this.players[utgIndex]?.id);
-    this.lastRaiseIndex = this.actionOrder.findIndex(p => p.id === this.players[this.bigBlindIndex]?.id);
-
     if (this.actionIndex === -1) this.actionIndex = 0;
-    if (this.lastRaiseIndex === -1) this.lastRaiseIndex = this.actionIndex;
 
     return true;
   }
@@ -162,8 +204,13 @@ class Game {
   }
 
   processAction(playerId, action, amount = 0) {
+    if (!BETTING_PHASES.includes(this.phase)) {
+      return { success: false, error: 'Cannot act during ' + this.phase };
+    }
+
     const player = this.players.find(p => p.id === playerId);
     if (!player) return { success: false, error: 'Player not found' };
+    if (player.folded || player.isAllIn) return { success: false, error: 'Cannot act' };
 
     const currentPlayer = this.getCurrentPlayer();
     if (!currentPlayer) return { success: false, error: 'No active player' };
@@ -190,6 +237,7 @@ class Game {
   handleFold(player) {
     player.folded = true;
     player.lastAction = 'fold';
+    this.hasActed.add(player.id);
     this.lastActions.push({ playerId: player.id, action: 'fold', amount: 0 });
 
     const activeNonFolded = this.actionOrder.filter(p => !p.folded && p.isActive);
@@ -206,6 +254,7 @@ class Game {
       return { success: false, error: 'Cannot check, must call or raise' };
     }
     player.lastAction = 'check';
+    this.hasActed.add(player.id);
     this.lastActions.push({ playerId: player.id, action: 'check', amount: 0 });
     this.advanceAction();
     return { success: true };
@@ -213,6 +262,8 @@ class Game {
 
   handleCall(player) {
     const callAmount = this.currentBet - player.currentBet;
+    this.hasActed.add(player.id);
+
     if (callAmount <= 0) {
       player.lastAction = 'check';
       this.lastActions.push({ playerId: player.id, action: 'check', amount: 0 });
@@ -223,7 +274,6 @@ class Game {
     const actual = player.bet(callAmount);
     player.lastAction = 'call';
     this.lastActions.push({ playerId: player.id, action: 'call', amount: actual });
-
     this.advanceAction();
     return { success: true };
   }
@@ -236,15 +286,18 @@ class Game {
 
     const raiseAmount = amount - player.currentBet;
     const actual = player.bet(raiseAmount);
-    this.currentBet = player.currentBet;
+    const isFullRaise = actual >= this.minRaise;
 
-    const raiseDelta = this.currentBet - (this.currentBet - actual);
-    if (raiseDelta >= this.minRaise) {
+    this.currentBet = player.currentBet;
+    this.hasActed.clear();
+    this.hasActed.add(player.id);
+
+    if (isFullRaise) {
       this.lastRaiseIndex = this.actionIndex;
     }
 
-    player.lastAction = 'raise';
-    this.lastActions.push({ playerId: player.id, action: 'raise', amount: actual });
+    player.lastAction = isFullRaise ? 'raise' : 'all_in';
+    this.lastActions.push({ playerId: player.id, action: player.lastAction, amount: actual });
 
     this.advanceAction();
     return { success: true };
@@ -253,20 +306,28 @@ class Game {
   handleAllIn(player) {
     const callAmount = this.currentBet - player.currentBet;
     const allInAmount = player.chips;
-    const totalAfterCall = player.currentBet + callAmount; 
 
     if (allInAmount > callAmount) {
-      const raiseAmount = allInAmount;
-      const actual = player.bet(raiseAmount);
+      const actual = player.bet(allInAmount);
+      const isFullRaise = actual > callAmount && actual >= this.minRaise;
+
       if (player.currentBet > this.currentBet) {
         this.currentBet = player.currentBet;
+      }
+
+      this.hasActed.clear();
+      this.hasActed.add(player.id);
+
+      if (isFullRaise) {
         this.lastRaiseIndex = this.actionIndex;
       }
+
       player.lastAction = 'all_in';
       this.lastActions.push({ playerId: player.id, action: 'all_in', amount: actual });
     } else {
-      const actual = player.bet(callAmount); 
-      player.lastAction = 'all_in';
+      const actual = player.bet(callAmount);
+      this.hasActed.add(player.id);
+      player.lastAction = 'call';
       this.lastActions.push({ playerId: player.id, action: 'call', amount: actual });
     }
 
@@ -300,25 +361,28 @@ class Game {
 
   isBettingRoundComplete() {
     const activePlayersNotAllIn = this.actionOrder.filter(p => !p.folded && !p.isAllIn);
-    if (activePlayersNotAllIn.length <= 0) return true;
+    if (activePlayersNotAllIn.length === 0) return true;
 
-    if (this.actionIndex === this.lastRaiseIndex) {
-      const currentPlayer = this.actionOrder[this.actionIndex];
-      if (currentPlayer && !currentPlayer.folded && !currentPlayer.isAllIn) {
-        if (currentPlayer.currentBet < this.currentBet) return false;
-      }
-    }
+    const allHaveActed = activePlayersNotAllIn.every(p => this.hasActed.has(p.id));
+    if (!allHaveActed) return false;
 
-    const allEqualBet = activePlayersNotAllIn.every(
-      p => p.currentBet === this.currentBet
-    );
-
-    const roundMade = this.actionIndex === this.lastRaiseIndex && allEqualBet;
-
-    return roundMade;
+    const allEqualBet = activePlayersNotAllIn.every(p => p.currentBet === this.currentBet);
+    return allEqualBet;
   }
 
   completeBettingRound() {
+    const activeNonAllIn = this.actionOrder.filter(p => !p.folded && !p.isAllIn);
+
+    if (activeNonAllIn.length <= 1) {
+      while (this.phase !== 'RIVER' && this.phase !== 'SHOWDOWN' && this.phase !== 'HAND_END') {
+        this.fastForwardStreet();
+      }
+      if (this.phase !== 'SHOWDOWN' && this.phase !== 'HAND_END') {
+        this.endHand();
+      }
+      return;
+    }
+
     switch (this.phase) {
       case 'PRE_FLOP':
         this.dealCommunityCards(3);
@@ -341,22 +405,41 @@ class Game {
     }
   }
 
+  fastForwardStreet() {
+    switch (this.phase) {
+      case 'PRE_FLOP':
+        this.dealCommunityCards(3);
+        this.phase = 'FLOP';
+        break;
+      case 'FLOP':
+        this.dealCommunityCards(1);
+        this.phase = 'TURN';
+        break;
+      case 'TURN':
+        this.dealCommunityCards(1);
+        this.phase = 'RIVER';
+        break;
+      case 'RIVER':
+        this.endHand();
+        break;
+    }
+  }
+
   startNewBettingRound() {
     this.currentBet = 0;
     this.minRaise = this.bigBlind;
+    this.hasActed = new Set();
 
     this.actionOrder.forEach(p => {
       p.currentBet = 0;
       p.lastAction = null;
     });
 
-    this.actionIndex = 0;
-    this.lastRaiseIndex = 0;
-
     const firstPlayer = this.actionOrder.find(p => !p.folded && !p.isAllIn);
     if (firstPlayer) {
       this.actionIndex = this.actionOrder.indexOf(firstPlayer);
-      this.lastRaiseIndex = this.actionIndex;
+    } else {
+      this.actionIndex = 0;
     }
 
     const activeNonAllIn = this.actionOrder.filter(p => !p.folded && !p.isAllIn);
@@ -427,8 +510,7 @@ class Game {
       const remainder = pot.amount - share * winners.length;
 
       for (let i = 0; i < winners.length; i++) {
-        const winAmount = share + (i === 0 ? remainder : 0);
-        winners[i].chips += winAmount;
+        winners[i].chips += share + (i === 0 ? remainder : 0);
       }
 
       this.winningPlayers = winners;
@@ -452,6 +534,7 @@ class Game {
     this.lastActions = [];
     this.winningPlayers = [];
     this.winningHandName = '';
+    this.hasActed = new Set();
 
     this.players.forEach(p => {
       p.cards = [];
@@ -460,6 +543,7 @@ class Game {
       p.folded = false;
       p.isAllIn = false;
       p.lastAction = null;
+      p.disconnected = false;
       if (p.chips > 0) p.isActive = true;
     });
 
@@ -497,7 +581,8 @@ class Game {
         isActive: p.isActive,
         seatIndex: p.seatIndex,
         lastAction: p.lastAction,
-        cardCount: p.isActive ? p.cards.length : 0
+        cardCount: p.isActive ? p.cards.length : 0,
+        disconnected: p.disconnected || false
       }))
     };
   }

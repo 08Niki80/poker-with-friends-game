@@ -11,6 +11,7 @@ class Player {
     this.isActive = true;
     this.seatIndex = -1;
     this.lastAction = null;
+    this.disconnected = false;
   }
 
   resetForNewHand() {

@@ -38,6 +38,8 @@ const createRoomBtn = document.getElementById('createRoomBtn');
 const joinRoomBtn = document.getElementById('joinRoomBtn');
 const lobbyError = document.getElementById('lobbyError');
 const connectionStatus = document.getElementById('connectionStatus');
+const refreshRoomsBtn = document.getElementById('refreshRoomsBtn');
+const roomList = document.getElementById('roomList');
 const startGameBtn = document.getElementById('startGameBtn');
 const newHandBtn = document.getElementById('newHandBtn');
 const addChipsBtn = document.getElementById('addChipsBtn');
@@ -45,9 +47,117 @@ const leaveRoomBtn = document.getElementById('leaveRoomBtn');
 
 serverUrlInput.value = window.location.origin || 'http://localhost:3001';
 
+let reconnectToken = localStorage.getItem('poker_token') || null;
+let reconnectRoomId = localStorage.getItem('poker_room') || null;
+let reconnectServerUrl = localStorage.getItem('poker_server') || null;
+
+if (reconnectToken && reconnectRoomId && reconnectServerUrl) {
+  serverUrlInput.value = reconnectServerUrl;
+  roomIdInput.value = reconnectRoomId;
+  connectionStatus.textContent = 'Previous session found. Click Rejoin or Create/Join.';
+  connectionStatus.className = 'status-text';
+
+  const rejoinBtn = document.createElement('button');
+  rejoinBtn.id = 'rejoinBtn';
+  rejoinBtn.textContent = 'Rejoin';
+  rejoinBtn.style.cssText = 'padding:8px 16px;background:#27ae60;color:white;border:none;border-radius:6px;cursor:pointer;font-weight:600;';
+  document.querySelector('.lobby-buttons').appendChild(rejoinBtn);
+
+  rejoinBtn.addEventListener('click', async () => {
+    lobbyError.textContent = '';
+    try {
+      await connectToServer(reconnectServerUrl);
+    } catch {
+      clearReconnectData();
+      return;
+    }
+
+    socket.emit('rejoin', { token: reconnectToken }, (response) => {
+      if (!response.success) {
+        lobbyError.textContent = response.error;
+        clearReconnectData();
+      } else {
+        if (response.token) {
+          localStorage.setItem('poker_token', response.token);
+          reconnectToken = response.token;
+        }
+        enterGame(reconnectRoomId, response.gameState);
+      }
+    });
+  });
+}
+
+function clearReconnectData() {
+  localStorage.removeItem('poker_token');
+  localStorage.removeItem('poker_room');
+  localStorage.removeItem('poker_server');
+  reconnectToken = null;
+  reconnectRoomId = null;
+  reconnectServerUrl = null;
+  const btn = document.getElementById('rejoinBtn');
+  if (btn) btn.remove();
+  connectionStatus.textContent = '';
+}
+
+refreshRoomsBtn.addEventListener('click', () => {
+  const url = serverUrlInput.value.trim();
+  if (!url) return;
+  connectAndListRooms(url);
+});
+
+function connectAndListRooms(serverUrl) {
+  connectToServer(serverUrl).then(() => {
+    socket.emit('listRooms', {}, (response) => {
+      if (response && response.success) {
+        renderRoomList(response.rooms);
+      }
+    });
+  }).catch(() => {});
+}
+
+function renderRoomList(rooms) {
+  if (!rooms || rooms.length === 0) {
+    roomList.innerHTML = '<div class="room-item empty">No active rooms</div>';
+    return;
+  }
+  roomList.innerHTML = rooms.map(r => `
+    <div class="room-item" data-room="${escapeHtml(r.roomId)}">
+      <span class="room-id">${escapeHtml(r.roomId)}</span>
+      <span class="room-players">${r.playerCount} player${r.playerCount > 1 ? 's' : ''}</span>
+      <span class="room-blinds">SB:${r.smallBlind}/BB:${r.bigBlind}</span>
+      <span class="room-phase ${r.phase === 'WAITING' ? 'open' : 'in-progress'}">${r.phase === 'WAITING' ? 'Open' : 'Playing'}</span>
+    </div>
+  `).join('');
+
+  document.querySelectorAll('.room-item').forEach(el => {
+    el.addEventListener('click', () => {
+      const roomId = el.dataset.room;
+      if (roomId) roomIdInput.value = roomId;
+    });
+  });
+}
+
 function setStatus(text, isError) {
   connectionStatus.textContent = text;
   connectionStatus.className = 'status-text' + (isError ? ' error' : '');
+}
+
+function tryReconnect() {
+  if (!reconnectToken || !reconnectServerUrl) return;
+  connectToServer(reconnectServerUrl).then(() => {
+    socket.emit('rejoin', { token: reconnectToken }, (response) => {
+      if (response && response.success) {
+        if (response.token) {
+          localStorage.setItem('poker_token', response.token);
+          reconnectToken = response.token;
+        }
+        setStatus('Reconnected!', false);
+        setTimeout(() => { setStatus('', false); }, 3000);
+      }
+    });
+  }).catch(() => {
+    setTimeout(() => tryReconnect(), 5000);
+  });
 }
 
 function connectToServer(serverUrl) {
@@ -88,6 +198,13 @@ function connectToServer(serverUrl) {
 
     socket.on('disconnect', () => {
       setStatus('Disconnected. Trying to reconnect...', true);
+      if (reconnectToken) {
+        setTimeout(() => {
+          if (socket && !socket.connected) {
+            tryReconnect();
+          }
+        }, 2000);
+      }
     });
   });
 }
@@ -139,6 +256,11 @@ createRoomBtn.addEventListener('click', async () => {
     if (!response.success) {
       lobbyError.textContent = response.error;
     } else {
+      if (response.token) {
+        localStorage.setItem('poker_token', response.token);
+        localStorage.setItem('poker_room', roomId);
+        localStorage.setItem('poker_server', serverUrl);
+      }
       enterGame(roomId, response.gameState);
     }
   });
@@ -164,6 +286,11 @@ joinRoomBtn.addEventListener('click', async () => {
     if (!response.success) {
       lobbyError.textContent = response.error;
     } else {
+      if (response.token) {
+        localStorage.setItem('poker_token', response.token);
+        localStorage.setItem('poker_room', roomId);
+        localStorage.setItem('poker_server', serverUrl);
+      }
       enterGame(roomId, response.gameState);
     }
   });
@@ -190,6 +317,7 @@ addChipsBtn.addEventListener('click', () => {
 });
 
 leaveRoomBtn.addEventListener('click', () => {
+  clearReconnectData();
   location.reload();
 });
 
@@ -308,7 +436,8 @@ function renderPlayers() {
     if (isActive) playerEl.classList.add('active-turn');
 
     let statusBadge = '';
-    if (p.folded) statusBadge = '<span class="badge folded">FOLDED</span>';
+    if (p.disconnected) statusBadge = '<span class="badge disconnected">DC</span>';
+    else if (p.folded) statusBadge = '<span class="badge folded">FOLDED</span>';
     else if (p.isAllIn) statusBadge = '<span class="badge allin">ALL IN</span>';
 
     const dealerBadge = p.seatIndex === gameState.dealerIndex ? '<span class="badge dealer">D</span>' : '';
