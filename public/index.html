@@ -1,0 +1,115 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Poker With Friends</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div id="app">
+    <div id="lobby">
+      <h1>Poker With Friends</h1>
+      <div id="lobby-form">
+        <div class="form-group">
+          <label>Server URL</label>
+          <input type="text" id="serverUrlInput" placeholder="http://localhost:3001">
+        </div>
+        <div class="form-group">
+          <label>Room ID</label>
+          <input type="text" id="roomIdInput" placeholder="Enter room code..." maxlength="20">
+        </div>
+        <div class="form-group">
+          <label>Your Name</label>
+          <input type="text" id="playerNameInput" placeholder="Enter your name..." maxlength="15">
+        </div>
+        <div class="form-group blinds-group">
+          <label>Small Blind</label>
+          <input type="number" id="smallBlindInput" value="5" min="1" max="1000">
+          <label>Big Blind</label>
+          <input type="number" id="bigBlindInput" value="10" min="2" max="2000">
+        </div>
+        <div class="lobby-buttons">
+          <button id="createRoomBtn">Create Room</button>
+          <button id="joinRoomBtn">Join Room</button>
+        </div>
+        <div id="connectionStatus" class="status-text"></div>
+        <div id="lobbyError" class="error-message"></div>
+      </div>
+    </div>
+
+    <div id="game" class="hidden">
+      <div id="game-header">
+        <div id="room-info">
+          Room: <span id="roomIdDisplay"></span> | Hand #<span id="handNumber">0</span>
+        </div>
+        <div id="blinds-info">
+          Blinds: <span id="blindsDisplay"></span>
+        </div>
+        <div id="phase-display"></div>
+      </div>
+
+      <div id="table">
+        <div id="community-cards">
+          <div class="community-card" data-index="0"></div>
+          <div class="community-card" data-index="1"></div>
+          <div class="community-card" data-index="2"></div>
+          <div class="community-card" data-index="3"></div>
+          <div class="community-card" data-index="4"></div>
+        </div>
+        <div id="pot-display">Pot: <span id="potAmount">0</span></div>
+      </div>
+
+      <div id="players-container"></div>
+
+      <div id="my-area">
+        <div id="my-cards">
+          <div class="hole-card" data-index="0"></div>
+          <div class="hole-card" data-index="1"></div>
+        </div>
+        <div id="my-info">
+          <div id="my-name"></div>
+          <div id="my-chips"></div>
+          <div id="my-bet"></div>
+        </div>
+        <div id="actions">
+          <button id="foldBtn" class="action-btn">Fold</button>
+          <button id="checkBtn" class="action-btn">Check</button>
+          <button id="callBtn" class="action-btn">Call</button>
+          <div id="raise-group">
+            <input type="range" id="raiseSlider" min="0" max="100" value="0">
+            <input type="number" id="raiseInput" min="0" value="0">
+            <button id="raiseBtn" class="action-btn">Raise</button>
+          </div>
+          <button id="allInBtn" class="action-btn">All In</button>
+        </div>
+      </div>
+
+      <div id="controls">
+        <button id="startGameBtn" class="control-btn">Start Game</button>
+        <button id="newHandBtn" class="control-btn hidden">New Hand</button>
+        <button id="addChipsBtn" class="control-btn">+1000 Chips</button>
+        <button id="leaveRoomBtn" class="control-btn">Leave</button>
+      </div>
+
+      <div id="chat">
+        <div id="chat-messages"></div>
+        <div id="chat-input-area">
+          <input type="text" id="chatInput" placeholder="Type a message..." maxlength="200">
+          <button id="sendChatBtn">Send</button>
+        </div>
+      </div>
+
+      <div id="winner-overlay" class="hidden">
+        <div id="winner-content">
+          <div id="winner-text"></div>
+          <button id="winner-close-btn">OK</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="https://cdn.socket.io/4.7.2/socket.io.min.js"></script>
+  <script src="client.js"></script>
+</body>
+</html>
