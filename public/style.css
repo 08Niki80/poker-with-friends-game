@@ -84,6 +84,20 @@ body {
   width: 260px;
 }
 
+#advancedToggle {
+  margin-bottom: 10px;
+}
+
+#showAdvancedLink {
+  color: #4ecdc4;
+  font-size: 0.8em;
+  text-decoration: none;
+}
+
+#showAdvancedLink:hover {
+  text-decoration: underline;
+}
+
 .status-text {
   margin-top: 12px;
   font-size: 0.85em;

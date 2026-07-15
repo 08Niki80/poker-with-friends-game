@@ -12,10 +12,6 @@
       <h1>Poker With Friends</h1>
       <div id="lobby-form">
         <div class="form-group">
-          <label>Server URL</label>
-          <input type="text" id="serverUrlInput" placeholder="http://localhost:3001">
-        </div>
-        <div class="form-group">
           <label>Room ID</label>
           <input type="text" id="roomIdInput" placeholder="Enter room code..." maxlength="20">
         </div>
@@ -28,6 +24,15 @@
           <input type="number" id="smallBlindInput" value="5" min="1" max="1000">
           <label>Big Blind</label>
           <input type="number" id="bigBlindInput" value="10" min="2" max="2000">
+        </div>
+        <div id="advancedToggle">
+          <a href="#" id="showAdvancedLink">Advanced</a>
+        </div>
+        <div id="advancedSettings" class="hidden">
+          <div class="form-group">
+            <label>Server URL</label>
+            <input type="text" id="serverUrlInput" placeholder="http://localhost:3001">
+          </div>
         </div>
         <div class="lobby-buttons">
           <button id="createRoomBtn">Create Room</button>

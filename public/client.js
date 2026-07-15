@@ -47,6 +47,14 @@ const leaveRoomBtn = document.getElementById('leaveRoomBtn');
 
 serverUrlInput.value = window.location.origin || 'http://localhost:3001';
 
+document.getElementById('showAdvancedLink').addEventListener('click', (e) => {
+  e.preventDefault();
+  const advanced = document.getElementById('advancedSettings');
+  const link = document.getElementById('showAdvancedLink');
+  const isHidden = advanced.classList.toggle('hidden');
+  link.textContent = isHidden ? 'Advanced' : 'Hide Advanced';
+});
+
 let reconnectToken = localStorage.getItem('poker_token') || null;
 let reconnectRoomId = localStorage.getItem('poker_room') || null;
 let reconnectServerUrl = localStorage.getItem('poker_server') || null;
